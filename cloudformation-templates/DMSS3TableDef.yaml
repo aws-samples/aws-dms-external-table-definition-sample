@@ -1,0 +1,105 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  This template provisions a AWS Glue crawler and AWS Glue database to help extract external table defintions 
+  required for using Amazon S3 as a source in AWS DMS.  
+Parameters:
+  SourceS3Bucket:
+    Description: Name of the Amazon S3 Bucket where the source files reside
+    Type: String
+  SourceS3FolderPath:
+    Description: >-
+      Amazon S3 prefix where source files reside.  The files in this folder should be in the form <schema name>/<table name>.  
+      Refer to https://docs.aws.amazon.com/dms/latest/userguide/CHAP_Source.S3.html for more information
+    Type: String
+Resources:
+  DMSS3AsSourceTableDefGlueRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - glue.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      Policies:
+        - PolicyName: DMSS3AsSourceTableDefGluePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - 'Glue:*'
+                Resource:
+                  - '*'
+                Effect: Allow
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource:
+                  - 'arn:aws:logs:*:*:/aws-glue/*'
+              - Effect: Allow
+                Action:
+                  - 's3:ListBucket'
+                Resource:
+                  - !Join 
+                    - ''
+                    - - 'arn:aws:s3:::'
+                      - !Ref SourceS3Bucket
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                Resource:
+                  - !Join 
+                    - ''
+                    - - 'arn:aws:s3:::'
+                      - !Ref SourceS3Bucket
+                      - /
+                      - !Ref SourceS3FolderPath
+                      - /*
+  DMSS3AsSourceTableDefDatabase:
+    Type: 'AWS::Glue::Database'
+    Properties:
+      CatalogId: !Ref 'AWS::AccountId'
+      DatabaseInput:
+        Name: !Join 
+          - ''
+          - - dms_db_
+            - !Ref 'AWS::StackName'
+            - _
+            - !Ref SourceS3FolderPath
+        Description: Database contains all tables/files to be loaded by DMS
+  DMSS3AsSourceTableDefCrawler:
+    Type: 'AWS::Glue::Crawler'
+    Properties:
+      Name: !Join 
+        - ''
+        - - dms_crawler_
+          - !Ref 'AWS::StackName'
+      Role: !GetAtt 
+        - DMSS3AsSourceTableDefGlueRole
+        - Arn
+      DatabaseName: !Ref DMSS3AsSourceTableDefDatabase
+      Targets:
+        S3Targets:
+          - Path: !Join 
+              - ''
+              - - !Ref SourceS3Bucket
+                - /
+                - !Ref SourceS3FolderPath
+      SchemaChangePolicy:
+        UpdateBehavior: UPDATE_IN_DATABASE
+        DeleteBehavior: LOG
+  
+Outputs:
+  DMSDatabase:
+    Description: 'Name of the Glue Database where the schema/tables have been identified '
+    Value: !Ref DMSS3AsSourceTableDefDatabase
+  DMSGlueCrawler:
+    Description: 'Name of the Glue crawler'
+    Value: !Ref DMSS3AsSourceTableDefCrawler
+
